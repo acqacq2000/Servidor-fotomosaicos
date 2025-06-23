@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Generador de Fotomosaico</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background-color: #0a0a0a;
+      color: #eaeaea;
+      font-family: 'Inter', sans-serif;
+      text-align: center;
+      padding: 30px;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      color: #ffffff;
+    }
+    p {
+      font-size: 1.1rem;
+      margin-bottom: 30px;
+      color: #ccc;
+    }
+    label {
+      font-weight: 600;
+      color: #ddd;
+    }
+    input[type="file"] {
+      background: #1a1a1a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 10px;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+    button {
+      padding: 12px 24px;
+      background: #ffffff;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-top: 10px;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background-color: #e6e6e6;
+    }
+    #tile-preview {
+      position: relative;
+      margin: 30px auto 10px auto;
+      background-color: #111;
+      border: 2px solid #333;
+      overflow: hidden;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      width: 640px;
+      height: 480px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tile {
+      position: absolute;
+      width: 128px;
+      height: 128px;
+      transition: transform 1.0s ease, opacity 1.0s ease;
+      transform-origin: center center;
+      box-shadow: 0 0 6px rgba(255,255,255,0.1);
+    }
+    .tile.anim-start {
+      opacity: 0;
+      transform: scale(10);
+    }
+    .tile.fade-out {
+      opacity: 0;
+      transition: opacity 1s ease;
+    }
+    #final-image {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 1.5s ease-in-out;
+      z-index: 5;
+    }
+    #loading-spinner {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 480px;
+      height: 180px;
+      z-index: 10;
+      flex-direction: column;
+      gap: 12px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 4.8px solid transparent;
+      border-top-color: #fff;
+    }
+    .ring1 { width: 450px; height: 450px; animation: spin 1.2s linear infinite; }
+    .ring2 { width: 421.875px; height: 421.875px; animation: spin 1.4s linear infinite; }
+    .ring3 { width: 393.75px; height: 393.75px; animation: spin 1.6s linear infinite; }
+    .ring4 { width: 365.625px; height: 365.625px; animation: spin 1.8s linear infinite; }
+    .ring5 { width: 337.5px; height: 337.5px; animation: spin 2s linear infinite; }
+    .ring6 { width: 309.375px; height: 309.375px; animation: spin 2.2s linear infinite; }
+    .ring7 { width: 281.25px; height: 281.25px; animation: spin 2.4s linear infinite; }
+    .ring8 { width: 253.125px; height: 253.125px; animation: spin 2.6s linear infinite; }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    #loading-spinner span {
+      position: relative;
+      display: inline-block;
+      font-size: 1.25rem;
+      color: #fff;
+      font-weight: 600;
+      z-index: 20;
+      pointer-events: none;
+      padding: 50px 100px;
+      background-color: transparent;
+      text-align: center;
+    }
+    #progreso-container {
+      margin: 20px auto;
+      font-size: 16px;
+      color: #bbb;
+    }
+    progress {
+      appearance: none;
+      width: 80%;
+      height: 22px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #1e1e1e;
+      border: 1px solid #444;
+    }
+    progress::-webkit-progress-bar {
+      background-color: #1e1e1e;
+    }
+    progress::-webkit-progress-value {
+      background: #888;
+    }
+    .estrella {
+      display: inline-block;
+      position: relative;
+      width: 40px;
+      height: 40px;
+      font-size: 40px;
+      color: #666;
+    }
+    .estrella::before {
+      content: '☆';
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+    .estrella.full::before {
+      content: '★';
+      color: #fff;
+    }
+    .estrella.half::before {
+      content: '★';
+      color: #fff;
+      background: linear-gradient(to right, #fff 50%, #333 50%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    textarea {
+      border-radius: 8px;
+      border: 1px solid #444;
+      padding: 10px;
+      background: #1a1a1a;
+      color: white;
+      resize: vertical;
+    }
+  </style>
+</head>
+<body>
+  <h1>Generador de Fotomosaico con IA</h1>
+  <p>Sube tu <strong>imagen objetivo</strong> y varias <strong>imágenes tiles</strong> para crear el mosaico en tiempo real.</p>
+
+  <label for="foto">Imagen objetivo (.jpg, .png):</label><br>
+  <input type="file" id="foto" accept=".jpg,.jpeg,.png" required><br>
+
+  <label for="tiles">Imágenes tiles (puedes subir varias):</label><br>
+  <input type="file" id="tiles" accept=".jpg,.jpeg,.png" multiple required><br>
+
+  <button onclick="subirArchivos()">Crear Fotomosaico</button>
+
+  <div id="tile-preview">
+    <div id="loading-spinner" style="display: none;">
+      <div class="ring ring1"></div>
+      <div class="ring ring2"></div>
+      <div class="ring ring3"></div>
+      <div class="ring ring4"></div>
+      <div class="ring ring5"></div>
+      <div class="ring ring6"></div>
+      <div class="ring ring7"></div>
+      <div class="ring ring8"></div>
+      <span>Entrenando modelo,<br>espere por favor...</span>
+    </div>
+    <img id="final-image" src="" alt="Mosaico final" />
+  </div>
+
+  <div id="progreso-container" style="display: none;">
+    <progress id="progreso" value="0" max="100"></progress>
+    <div id="texto-progreso">0% (0 / 0 tiles)</div>
+  </div>
+
+  <!-- Comentarios y feedback -->
+  <div id="resultado-final" style="margin-top: 30px; display: none; text-align: center;">
+    <label for="comentario">Comentarios:</label><br>
+    <textarea id="comentario" rows="4" cols="50" placeholder="Escribe aquí tu opinión..."></textarea><br><br>
+
+    <label>Valoración:</label><br>
+    <div id="estrellas" style="font-size: 40px; cursor: pointer; display: inline-block;"></div>
+
+    <div style="margin-top: 20px;">
+      <button onclick="enviarFeedback()">Enviar Feedback</button>
+      <button onclick="descargarMosaico()">Descargar Mosaico</button>
+    </div>
+  </div>
+
+  <script>
+    let tileWidth = 32;
+    let tileHeight = 32;
+    let totalTiles = 0;
+    let tilesColocadas = 0;
+    let puntuacionFinal = 0;
+    let socket = null;
+    let yaIniciado = false;
+
+    function mostrarSpinner() {
+      document.getElementById("loading-spinner").style.display = "flex";
+    }
+
+    function ocultarSpinner() {
+      document.getElementById("loading-spinner").style.display = "none";
+    }
+
+    async function subirArchivos() {
+      const fotoInput = document.getElementById('foto');
+      const tilesInput = document.getElementById('tiles');
+      const formData = new FormData();
+
+      if (!fotoInput.files[0] || tilesInput.files.length === 0) {
+        alert('Selecciona imagen objetivo y al menos una tile.');
+        return;
+      }
+
+      formData.append('foto', fotoInput.files[0]);
+      for (const file of tilesInput.files) formData.append('tiles', file);
+
+      mostrarSpinner();
+
+      const response = await fetch('/subir', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        alert('Error al subir archivos.');
+        ocultarSpinner();
+      }
+    }
+
+    function inicializarSocket() {
+      if (yaIniciado) return;
+      yaIniciado = true;
+
+      socket = io({ reconnectionAttempts: 3, reconnectionDelay: 3000 });
+
+      socket.on('mosaic_init', data => {
+        ocultarSpinner();
+        const container = document.getElementById('tile-preview');
+        container.dataset.iniciado = "true";
+
+        const cols = data.cols;
+        const rows = data.rows;
+        totalTiles = cols * rows;
+        tilesColocadas = 0;
+
+        const maxSize = 640;
+        const aspectRatio = cols / rows;
+        let width = aspectRatio >= 1 ? maxSize : maxSize * aspectRatio;
+        let height = aspectRatio >= 1 ? maxSize / aspectRatio : maxSize;
+
+        container.style.width = `${width}px`;
+        container.style.height = `${height}px`;
+
+        tileWidth = width / cols;
+        tileHeight = height / rows;
+
+        document.getElementById("progreso-container").style.display = "block";
+        actualizarProgreso();
+      });
+
+      socket.on('tile_placed', data => {
+        const container = document.getElementById('tile-preview');
+        if (!container.dataset.iniciado) return;
+
+        const img = document.createElement('img');
+        img.src = 'data:image/png;base64,' + data.thumb;
+        img.classList.add('tile', 'anim-start');
+        img.style.left = `${data.col * tileWidth}px`;
+        img.style.top = `${data.row * tileHeight}px`;
+        img.style.width = `${tileWidth}px`;
+        img.style.height = `${tileHeight}px`;
+
+        container.appendChild(img);
+
+        requestAnimationFrame(() => setTimeout(() => img.classList.remove('anim-start'), 20));
+
+        tilesColocadas++;
+        actualizarProgreso();
+      });
+
+      socket.on('mosaic_done', data => {
+        if (data.status === 'success') {
+          const tiles = document.querySelectorAll('.tile');
+          tiles.forEach(tile => tile.classList.add('fade-out'));
+          setTimeout(() => mostrarMosaicoFinal(data.result_url), 1000);
+        }
+      });
+    }
+
+    function actualizarProgreso() {
+      const porcentaje = (tilesColocadas / totalTiles) * 100;
+      document.getElementById("progreso").value = porcentaje;
+      document.getElementById("texto-progreso").innerText = `${porcentaje.toFixed(1)}% (${tilesColocadas} / ${totalTiles} tiles)`;
+    }
+
+    function mostrarMosaicoFinal(url) {
+      const finalImage = document.getElementById("final-image");
+      finalImage.src = url;
+      finalImage.style.opacity = "1";
+
+      document.getElementById("progreso-container").style.display = "none";
+      document.getElementById("resultado-final").style.display = "block";
+
+      crearEstrellas();
+    }
+
+    function enviarFeedback() {
+      const comentario = document.getElementById("comentario").value;
+      fetch('/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estrellas: puntuacionFinal, comentario: comentario })
+      }).then(res => {
+        if (res.ok) alert("¡Gracias por tu feedback!");
+        else alert("Error al enviar feedback");
+      });
+    }
+
+    function descargarMosaico() {
+      const url = document.getElementById("final-image").src;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'fotomosaico.png';
+      link.click();
+    }
+
+    function crearEstrellas() {
+      const estrellasDiv = document.getElementById('estrellas');
+      estrellasDiv.innerHTML = '';
+
+      for (let i = 0; i < 5; i++) {
+        const estrella = document.createElement('span');
+        estrella.classList.add('estrella');
+        estrella.setAttribute('data-index', i);
+        estrella.addEventListener('mousemove', detectarHover);
+        estrella.addEventListener('mouseleave', resetEstrellas);
+        estrella.addEventListener('click', fijarPuntuacion);
+        estrellasDiv.appendChild(estrella);
+      }
+      resetEstrellas();
+    }
+
+    function detectarHover(e) {
+      const index = parseInt(e.target.getAttribute('data-index'));
+      const rect = e.target.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const estrellas = document.querySelectorAll('.estrella');
+      estrellas.forEach((estrella, i) => {
+        estrella.classList.remove('full', 'half');
+        if (i < index) estrella.classList.add('full');
+        else if (i === index) estrella.classList.add(x < rect.width / 2 ? 'half' : 'full');
+      });
+    }
+
+    function resetEstrellas() {
+      const estrellas = document.querySelectorAll('.estrella');
+      const valor = puntuacionFinal;
+      estrellas.forEach((estrella, i) => {
+        estrella.classList.remove('full', 'half');
+        if (i + 1 <= valor) estrella.classList.add('full');
+        else if (i + 0.5 === valor) estrella.classList.add('half');
+      });
+    }
+
+    function fijarPuntuacion(e) {
+      const index = parseInt(e.target.getAttribute('data-index'));
+      const rect = e.target.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      puntuacionFinal = x < rect.width / 2 ? index + 0.5 : index + 1;
+      resetEstrellas();
+    }
+
+    window.addEventListener('load', inicializarSocket);
+    setInterval(() => {
+      if (socket && socket.connected) socket.emit('keepalive');
+    }, 5000);
+  </script>
+</body>
+</html>
